@@ -1,12 +1,4 @@
-## 这个PART介绍虚拟文件系统和在他下面的实际的文件系统,你将学习VFS（虚拟文件系统），其主要数据结构，扩展的文件系统家族，以及与Linux中不同文件系统相关的概念。
-
-这一PART包含如下部分
-1. 一切的开始-- 虚拟文件系统
-2. 虚拟文件系统的数据结构
-3. 在虚拟文件系统下面实际的文件系统
-
-
-## 一切的开始-- 虚拟文件系统
+# 一切的开始-- 虚拟文件系统
 
 即使在软件开发领域取得天文般的进步，linux 内核仍然保留着非常复杂的代码。开发者或者维护人员还有一切内核的高手不断进入内核添加一些特性。其他的爱好者尝试理解他并解决一些困惑。
 
@@ -20,8 +12,8 @@
 1. 了解现代数据中心的存储技术
 2. 系统调用
 3. 了解虚拟文件系统的必要
-4. 对虚拟文件系统的描述
-5. 一切皆文件的哲学
+4. VFS概览
+5. 解释“一切皆文件”哲学
 
 ### 技术要求
 
@@ -36,7 +28,7 @@ For Fedora/CentOS/Red Hat-based systems:
 - sudo yum install bcc-tools
 
 
-## 理解现代数据中心中的存储技术
+## 了解现代数据中心的存储技术
 
 > 在数据尚未获得之前就进行理论推导，这是个严重的错误。不知不觉中，人就会开始歪曲事实以适应理论，而不是根据事实来调整理论。——阿瑟·柯南·道尔爵士
 
@@ -51,7 +43,7 @@ For Fedora/CentOS/Red Hat-based systems:
 在谈及存储介质的选择时，需要注意的是，无论硬件多么强大，其功能始终存在局限性。应用程序和操作系统根据硬件进行调整同样非常重要。对应用程序、操作系统和文件系统参数进行细致调优，可以显著提升整体性能。为了充分发挥底层硬件的潜力，I/O层次结构中的所有层级都需要高效运行。
 
 
-## 在linux中与存储进行交互
+### 在linux中与存储进行交互
 
 linux内核在用户空间和内核空间有清晰的差异，所有的硬件资源，如CPU、内存和存储，都位于内核空间。对于任何用户空间的资源来说 如果想要访问内核空间的资源，必须通过系统调用如图Figure1.1。
 
@@ -75,7 +67,7 @@ Linux 中的存储栈由多个紧密相连的层组成，这些层共同确保�
 
 - 网络文件系统（NFS）：NFS 是一种允许远程文件共享的协议。与常规的块级文件系统不同，NFS 基于多个主机之间共享数据的概念。NFS 的工作模式是客户端和服务器的概念。后端存储由 NFS 服务器提供。挂载 NFS 文件系统的主机系统称为客户端。客户端和服务器之间的连接是通过常规以太网实现的。所有 NFS 客户端共享 NFS 服务器上的单一文件副本。NFS 的性能不如块级文件系统，但它仍然广泛应用于企业环境，主要用于存储长期备份和共享常用数据。
 
-- /proc (procfs)和/sys (sysfs)属于这一类别。这些目录包含虚拟或临时文件，其中包含有关不同内核子系统的信息。这些伪文件系统也是虚拟文件系统的一部分，正如我们将在万物皆文件章节中看到的那样。
+- 伪文件系统 /proc (procfs)和/sys (sysfs)属于这一类别。这些目录包含虚拟或临时文件，其中包含有关不同内核子系统的信息。这些伪文件系统也是虚拟文件系统的一部分，正如我们将在万物皆文件章节中看到的那样。
 
 现在我们对用户空间、内核空间和不同类型的文件系统有了基本的了解，接下来我们将解释应用程序如何通过系统调用在内核空间中请求资源。
 
@@ -221,8 +213,302 @@ VFS 的主要目标是以最小的开销在内核中表示多种文件系统。�
 
 内核中与文件系统相关的所有操作都与 VFS 数据结构紧密集成。为了支持 Linux 上的非原生文件系统，内核动态构建相应的数据结构。例如，为了满足 FAT 等文件系统的通用文件模型，将在内存中动态创建对应于目录的文件。这些文件是虚拟的，只存在于内存中。这是一个需要理解的重要概念。在原生文件系统中，像 inode 和超级块这样的结构不仅存在于内存中，还存储在物理介质上。相反，非 Linux 文件系统只需要在内存中执行这些结构的实现。
 
-## 查看源码
+### 查看源码
 
 如果我们查看内核 的源码，fs提供的代码都在fs/目录下。所有以 .c 结尾的源文件都包含了不同 VFS 方法的实现。子目录包含特定文件系统的实现。
 
 ![alt text](image-4.png)
+
+你会注意到open.c 和read_write.c文件，当在用户空间调用open()和read()或write()时，内核会调用这些文件。这些文件包含了太多的代码，所以我们不会在这里编写代码，仅仅做一个小练习。然而，这些文件中有一些重要的代码片段突出了我们之前所解释的内容。让我们快速看一下读取和写入函数。
+
+SYSCALL_DEFINE3宏是定义系统调用的标准方式，其中一个参数就是系统调用的名称。
+
+为了写一个系统调用，看下面的函数，注意到其中一个参数是文件描述符。
+
+```C
+SYSCALL_DEFINE3(write, unsigned int, fd, const char __user *, buf,
+size_t, count)
+{
+ return ksys_write(fd, buf, count);
+}
+```
+
+这是read的系统调用。
+```C
+SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t,
+count)
+{
+ return ksys_read(fd, buf, count);
+}
+```
+
+两者都调用了ksys_write () 和 ksys_read () 的系统调用实现。
+```C
+ssize_t ksys_read(unsigned int fd, char __user *buf, size_t count)
+{
+ struct fd f = fdget_pos(fd);
+ ssize_t ret = -EBADF;
+******* Skipped *******
+ ret = vfs_read(f.file, buf, count, ppos);
+******* Skipped *******
+ return ret;
+}
+
+ssize_t ksys_write(unsigned int fd, const char __user *buf, size_t
+count)
+{
+ struct fd f = fdget_pos(fd);
+ ssize_t ret = -EBADF;
+******* Skipped *******
+ ret = vfs_write(f.file, buf, count, ppos);
+ ******* Skipped *******
+ return ret;
+}
+```
+
+vfs_read () 和 vfs_write () 函数的存在表明我们正在过渡到 VFS。这些函数查找底层文件系统的 file_operations 结构，并调用适当的 read () 和 write () 方法：
+```C
+ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
+{
+******* Skipped *******
+        if (file->f_op->read)
+                ret = file->f_op->read(file, buf, count, pos);
+        else if (file->f_op->read_iter)
+                ret = new_sync_read(file, buf, count, pos);
+******* Skipped *******
+return ret;
+}
+ssize_t vfs_write(struct file *file, const char __user *buf, size_t count, loff_t *pos)
+{
+******* Skipped *******
+        if (file->f_op->write)
+                ret = file->f_op->write(file, buf, count, pos);
+        else if (file->f_op->write_iter)
+                ret = new_sync_write(file, buf, count, pos);
+ ******* Skipped *******
+       return ret;
+}
+
+```
+
+每个文件系统定义了支持操作的 file_operations 结构体。内核源代码中有多个 file_operations 结构体的定义，每个文件系统都有独特的定义。该结构体中定义的操作描述了读写函数如何执行：
+```C
+root@linuxbox:/linux-5.19.9/fs# grep -R "struct file_operations" * | wc -l
+453
+root@linuxbox:/linux-5.19.9/fs# grep -R "struct file_operations" *
+9p/vfs_dir.c:const struct file_operations v9fs_dir_operations = {
+9p/vfs_dir.c:const struct file_operations v9fs_dir_operations_dotl = {
+9p/v9fs_vfs.h:extern const struct file_operations v9fs_file_operations;
+9p/v9fs_vfs.h:extern const struct file_operations v9fs_file_operations_dotl;
+9p/v9fs_vfs.h:extern const struct file_operations v9fs_dir_operations;
+9p/v9fs_vfs.h:extern const struct file_operations v9fs_dir_operations_dotl;
+9p/v9fs_vfs.h:extern const struct file_operations v9fs_cached_file_operations;
+9p/v9fs_vfs.h:extern const struct file_operations v9fs_cached_file_operations_dotl;
+9p/v9fs_vfs.h:extern const struct file_operations v9fs_mmap_file_operations;
+9p/v9fs_vfs.h:extern const struct file_operations v9fs_mmap_file_operations_dotl;
+```
+[其余代码因简洁性省略。]
+
+file_operations 结构体适用于各种文件类型，包括常规文件、目录、设备文件和网络套接字。一般来说，任何可以使用标准文件 I/O 操作打开和操作的文件类型，都可以通过此结构体来处理。
+
+### 跟踪 VFS 函数
+
+Linux 提供了相当多的跟踪机制，可以让我们窥见其底层工作原理。其中之一是 funccount。顾名思义，funccount (`sudo dnf install bpftrace,export PATH=$PATH:/usr/share/bcc/tools`)用于计算函数调用的次数：
+```C
+root@linuxbox:~# funccount --help
+usage: funccount [-h] [-p PID] [-i INTERVAL] [-d DURATION] [-T] [-r] [-D]
+                 [-c CPU]
+                 pattern
+Count functions, tracepoints, and USDT probes
+
+```
+
+为了测试和验证我们之前的理解，我们将在后台运行一个简单的复制进程，并使用 funccount 程序跟踪由于执行 cp 命令而调用的 VFS 函数。由于我们只需要计算 cp 进程的 VFS 调用次数，因此需要使用 -p 标志来指定进程 ID。vfs_* 参数将跟踪该进程的所有 VFS 函数。你会看到 vfs_read () 和 vfs_write () 函数是由 cp 进程调用的。COUNT 列显示该函数被调用的次数：
+
+```C
+funccount -p process_ID 'vfs_*'
+[root@linuxbox ~]# nohup cp myfile /tmp/myfile &
+[1] 1228433
+[root@linuxbox ~]# nohup: ignoring input and appending output to 'nohup.out'
+[root@linuxbox ~]#
+[root@linuxbox ~]# funccount -p 1228433 "vfs_*"
+Tracing 66 functions for "b'vfs_*'"... Hit Ctrl-C to end.
+^C
+FUNC                                    COUNT
+b'vfs_read'                             28015
+b'vfs_write'                            28510
+Detaching...
+[root@linuxbox ~]#
+
+```
+我们再运行一次，看看在执行简单的复制操作时使用了哪些系统调用。正如预期的那样，在执行 cp 时最常用的系统调用是 read 和 write：
+
+```C
+funccount 't:syscalls:sys_enter_*' -p process_ID
+[root@linuxbox ~]# nohup cp myfile /tmp/myfile &
+[1] 1228433
+[root@linuxbox ~]# nohup: ignoring input and appending output to 'nohup.out'
+[root@linuxbox ~]#
+[root@linuxbox ~]# /usr/share/bcc/tools/funccount -p 1228433 "vfs_*"
+Tracing 66 functions for "b'vfs_*'"... Hit Ctrl-C to end.
+^C
+FUNC                                    COUNT
+b'vfs_read'                             28015
+b'vfs_write'                            28510
+Detaching...
+[root@linuxbox ~]#
+```
+
+让我们总结一下本节内容。Linux 支持多种文件系统，内核中的 VFS 层确保了这一目标能够轻松实现。VFS 为终端用户进程与不同的文件系统交互提供了标准化的方法。这一标准化是通过实现通用文件模式来实现的。VFS 定义了多个虚拟函数来执行常见的文件操作。由于这种方法，应用程序可以普遍地执行常规文件操作。当一个进程发出系统调用时，VFS 会将这些调用重定向到相应的文件系统函数。
+
+
+## 解释“一切皆文件”哲学
+在 Linux 中，以下所有内容都被视为文件：
+
+- 目录
+- 磁盘驱动器及其分区
+- 套接字
+- 管道
+- 光盘
+
+一切皆文件这一说法意味着，Linux 中的所有上述实体都通过文件描述符表示，并通过 VFS 进行了抽象。你也可以说一切都有文件描述符，不过我们不在此展开这个辩论。
+
+特征化 Linux 系统架构的一切皆文件理念也得益于 VFS 的实现。之前我们定义了伪文件系统，它们是动态生成内容的文件系统。这些文件系统也被称为 VFS，并在实现这一理念中发挥了重要作用。
+
+你可以通过procfs伪文件系统获取当前已注册到内核的文件系统列表。在查看这个列表时，注意第一列中有些文件系统会标记为nodev。nodev表示这是一个伪文件系统，不依赖于块设备。像 Ext2、3、4 这样的文件系统是基于块设备创建的，因此它们在第一列中没有nodev标记：
+```C
+cat /proc/filesystems
+[root@linuxbox ~]# cat /proc/filesystems
+nodev   sysfs
+nodev   tmpfs
+nodev   bdev
+nodev   proc
+nodev   cgroup
+nodev   cgroup2
+nodev   cpuset
+nodev   devtmpfs
+nodev   configfs
+nodev   debugfs
+nodev   tracefs
+nodev   securityfs
+nodev   sockfs
+nodev   bpf
+nodev   pipefs
+nodev   ramfs
+[其余代码省略以简化内容。]
+```
+你也可以使用mount命令来查看当前系统中已挂载的伪文件系统：
+```
+mount | grep -v sd | grep -ivE ":/|mapper"
+[root@linuxbox ~]# mount | grep -v sd | grep -ivE ":/|mapper"
+sysfs on /sys type sysfs (rw,nosuid,nodev,noexec,relatime)
+proc on /proc type proc (rw,nosuid,nodev,noexec,relatime)
+devtmpfs on /dev type devtmpfs (rw,nosuid,size=1993552k,nr_inodes=498388,mode=755)
+securityfs on /sys/kernel/security type securityfs (rw,nosuid,nodev,noexec,relatime)
+tmpfs on /dev/shm type tmpfs (rw,nosuid,nodev)
+devpts on /dev/pts type devpts (rw,nosuid,noexec,relatime,gid=5,mode=620,ptmxmode=000)
+tmpfs on /run type tmpfs (rw,nosuid,nodev,mode=755)
+tmpfs on /sys/fs/cgroup type tmpfs (ro,nosuid,nodev,noexec,mode=755)
+cgroup on /sys/fs/cgroup/systemd type cgroup (rw,nosuid,nodev,noexec,relatime,xattr,release_agent=/usr/lib/systemd/systemd-cgroups-agent,name=systemd)
+pstore on /sys/fs/pstore type pstore (rw,nosuid,nodev,noexec,relatime)
+efivarfs on /sys/firmware/efi/efivars type efivarfs (rw,nosuid,nodev,noexec,relatime)
+[其余代码省略以简化内容。]
+```
+让我们来浏览一下/proc目录。你会看到一长串编号的目录；这些数字代表了系统中当前运行的所有进程的 ID：
+```
+[root@linuxbox ~]# ls /proc/
+1    1116   1228072  1235  1534  196  216  30   54   6  631  668  810      ioports     scsi
+10   1121   1228220  1243  1535  197  217  32   55   600  632  670  9      irq         self
+1038  1125  1228371  1264  1536  198  218  345  56   602  
+633  673  905      kallsyms     slabinfo
+1039  1127  1228376  13    1537  199  219  347  570  603  
+634  675  91       kcore      softirqs
+1040  1197  1228378  14    1538  2    22   348  573  605  635  677  947      keys       stat
+1041  12    1228379  1442  16    20   220  37   574  607  
+636  679  acpi     key-users  swaps
+1042  1205  1228385  1443  1604  200  221  38   576  609  
+637  681  buddyinfo  kmsg       sys
+1043  1213  1228386  1444  1611  201  222  39   577  610  638  684  bus      kpagecgroup  sysrq-
+[其余代码省略以简化内容。]
+```
+procfs文件系统让我们得以窥见内核的运行状态。/proc中的内容是在我们查看时生成的。这些信息并不是持久保存在你的磁盘上的，所有这一切都发生在内存中。正如你从ls命令中看到的那样，/proc在磁盘上的大小为零字节：
+```
+[root@linuxbox ~]# ls -ld /proc/
+dr-xr-xr-x 292 root root 0 Sep 20 00:41 /proc/
+[root@linuxbox ~]#
+```
+/proc提供了一个实时视图，展示了系统中正在运行的进程。考虑一下/proc/cpuinfo文件。这个文件显示了与你系统相关的处理器信息。如果我们检查这个文件，它会显示为empty：
+```
+[root@linuxbox ~]# ls -l /proc/cpuinfo
+-r--r--r-- 1 root root 0 Nov  5 02:02 /proc/cpuinfo
+[root@linuxbox ~]#
+[root@linuxbox ~]# file /proc/cpuinfo
+/proc/cpuinfo: empty
+[root@linuxbox ~]#
+```
+然而，当通过cat查看文件内容时，会显示大量信息：
+```
+[root@linuxbox ~]# cat /proc/cpuinfo
+processor       : 0
+vendor_id       : GenuineIntel
+cpu family      : 6
+model           : 79
+model name      : Intel(R) Xeon(R) CPU E5-2683 v4 @ 2.10GHz
+stepping        : 1
+microcode       : 0xb00003e
+cpu MHz         : 2099.998
+cache size      : 40960 KB
+physical id     : 0
+siblings        : 1
+core id         : 0
+cpu cores       : 1
+apicid          : 0
+initial apicid  : 0
+fpu             : yes
+fpu_exception   : yes
+cpuid level     : 20
+wp              : yes
+[其余代码省略以简化内容。]
+```
+Linux 将所有实体（如进程、目录、网络套接字和存储设备）抽象为 VFS（虚拟文件系统）。通过 VFS，我们可以从内核中获取信息。大多数 Linux 发行版提供多种工具来监控存储、计算和内存资源的消耗。所有这些工具通过procfs中的数据收集各种指标的统计信息。例如，mpstat命令提供关于系统中所有处理器的统计信息，它从/proc/stat文件中获取数据，然后以人类可读的格式呈现这些数据，便于理解：
+```
+[root@linuxbox ~]# cat /proc/stat
+cpu  5441359 345061 4902126 1576734730 46546 1375926 942018 0 0 0
+cpu0 1276258 81287 1176897 394542528 13159 255659 280236 0 0 0
+cpu1 1455759 126524 1299970 394192241 13392 314865 178446 0 0 0
+cpu2 1445048 126489 1319450 394145153 12496 318550 186289 0 0 0
+cpu3 1264293 10760 1105807 393854806 7498 486850 297045 0 0 0
+[为了简洁，省略了其余的代码。]
+```
+如果我们在mpstat命令上使用strace工具，它将显示在后台，mpstat使用/proc/stat文件来显示处理器统计信息：
+```
+strace mpstat 2>&1 |grep "/proc/stat"
+[root@linuxbox ~]# strace mpstat 2>&1 |grep "/proc/stat"
+openat(AT_FDCWD, "/proc/stat", O_RDONLY) = 3
+[root@linuxbox ~]#
+```
+类似地，常用命令如top、ps和free会从/proc/meminfo文件中收集与内存相关的信息：
+```
+[root@linuxbox ~]# strace free -h 2>&1 |grep meminfo
+openat(AT_FDCWD, "/proc/meminfo", O_RDONLY) = 3
+[root@linuxbox ~]#
+```
+类似于/proc，另一个常用的伪文件系统是/sys。sysfs 文件系统主要包含关于系统硬件设备的信息。例如，要查找系统中磁盘驱动器的信息，如其型号，可以执行以下命令：
+```
+cat /sys/block/sda/device/model
+[root@linuxbox ~]# cat /sys/block/sda/device/model
+SAMSUNG MZMTE512
+[root@linuxbox ~]#
+```
+即使是键盘上的 LED 灯也有一个对应的文件在/sys中：
+```
+[root@linuxbox ~]# ls /sys/class/leds
+ath9k-phy0  input4::capslock  input4::numlock  input4::scrolllock
+[root@linuxbox ~]#
+```
+一切皆文件的哲学是 Linux 内核的一个定义性特征。它意味着系统中的一切，包括常规文本文件、目录和设备，都可以通过内核中的 VFS 层进行抽象。因此，所有这些实体都可以通过 VFS 层表示为类似文件的对象。Linux 中有几个伪文件系统，包含有关不同内核子系统的信息。这些伪文件系统的内容仅存在于内存中，并动态生成。
+
+# 总结
+Linux 存储栈是一个复杂的设计，由多个层次组成，所有这些层次都协同工作。像其他硬件资源一样，存储位于内核空间。当用户空间程序想要访问这些资源时，它必须调用系统调用。Linux 中的系统调用接口允许用户空间程序访问内核空间中的资源。当用户空间程序想要访问磁盘上的内容时，它首先与 VFS 子系统交互。VFS 提供文件系统相关接口的抽象，并负责在内核中容纳多个文件系统。通过其通用文件系统接口，VFS 拦截来自用户空间程序的通用系统调用（如read()和write()），并将它们重定向到文件系统层中的适当接口。由于这种方式，用户空间程序无需关心底层使用的文件系统，它们可以统一地执行文件系统操作。
+
+本章作为对主要 Linux 内核子系统虚拟文件系统（VFS）的介绍，讲解了其在 Linux 内核中的主要功能。VFS 通过数据结构，如索引节点（inode）、超级块（superblock）和目录项（directory entries），为所有文件系统提供了一个统一的接口。在下一章，我们将深入探讨这些数据结构，并解释它们如何帮助 VFS 管理多个文件系统。
